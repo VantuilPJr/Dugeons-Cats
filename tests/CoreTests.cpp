@@ -4,6 +4,7 @@
 #include "structures/LinkedList.h"
 #include "structures/Queue.h"
 #include "structures/Stack.h"
+#include "systems/AttributeModifiers.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -53,6 +54,15 @@ int main()
     expect(inventory.consume(ItemType::Sachet), "inventory consume");
     expect(inventory.count(ItemType::Sachet) == 1, "inventory count after consume");
 
+    const CombatAttributes baseAttributes{10, 100.0F, 0.40F, 0.10F};
+    const CombatAttributes normalAttributes = calculateRunAttributes(baseAttributes, 4, false);
+    const CombatAttributes rageAttributes = calculateRunAttributes(baseAttributes, 4, true);
+    expect(normalAttributes.attack == 14 && baseAttributes.attack == 10, "run bonus does not mutate base attack");
+    expect(rageAttributes.attack == 21, "rage attack modifier");
+    expect(rageAttributes.speed > normalAttributes.speed, "rage speed modifier");
+    expect(rageAttributes.attackInterval < normalAttributes.attackInterval, "rage attack speed modifier");
+    expect(rageAttributes.criticalChance > normalAttributes.criticalChance, "rage critical modifier");
+
     DungeonGraph graph;
     for (int index = 0; index < 5; ++index)
     {
@@ -90,4 +100,3 @@ int main()
     std::cerr << failures << " test(s) failed.\n";
     return EXIT_FAILURE;
 }
-

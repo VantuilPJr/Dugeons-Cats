@@ -2,9 +2,11 @@
 
 #include "dungeon/Dungeon.h"
 #include "dungeon/DungeonGenerator.h"
+#include "entities/CarameloBoss.h"
 #include "entities/Enemy.h"
 #include "entities/Player.h"
 #include "input/InputManager.h"
+#include "systems/AudioSystem.h"
 #include "systems/WorldObjects.h"
 
 #include <raylib.h>
@@ -52,6 +54,7 @@ private:
     void renderDungeon() const;
     void renderObjects() const;
     void renderEnemies() const;
+    void renderBoss() const;
     void renderPlayer() const;
     void renderParticles() const;
     void renderHud() const;
@@ -65,11 +68,14 @@ private:
     [[nodiscard]] Vector2 roomWorldCenter(int roomId) const;
 
     InputManager input_;
+    AudioSystem audio_;
     RenderTexture2D renderTarget_{};
+    Texture2D titleBackground_{};
     Camera2D camera_{};
     DungeonGenerator generator_;
     Dungeon dungeon_;
     Player player_;
+    CarameloBoss boss_;
     std::vector<Enemy> enemies_;
     std::vector<WorldItem> worldItems_;
     std::vector<TrashCan> trashCans_;
@@ -86,4 +92,3 @@ private:
     bool initialized_ = false;
     bool showDebug_ = false;
 };
-

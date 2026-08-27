@@ -2,6 +2,7 @@
 
 #include "input/GameAction.h"
 #include "input/InputManager.h"
+#include "systems/AttributeModifiers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -91,18 +92,20 @@ Rectangle Player::attackHitbox() const
 
 int Player::attack() const
 {
-    const int normalAttack = baseAttack_ + permanentAttackBonus_;
-    return isRaging() ? static_cast<int>(normalAttack * 1.55F) : normalAttack;
+    const CombatAttributes base{baseAttack_, baseSpeed_, baseAttackInterval_, baseCriticalChance_};
+    return calculateRunAttributes(base, permanentAttackBonus_, isRaging()).attack;
 }
 
 float Player::speed() const
 {
-    return isRaging() ? baseSpeed_ * 1.28F : baseSpeed_;
+    const CombatAttributes base{baseAttack_, baseSpeed_, baseAttackInterval_, baseCriticalChance_};
+    return calculateRunAttributes(base, permanentAttackBonus_, isRaging()).speed;
 }
 
 float Player::criticalChance() const
 {
-    return baseCriticalChance_ + (isRaging() ? 0.18F : 0.0F);
+    const CombatAttributes base{baseAttack_, baseSpeed_, baseAttackInterval_, baseCriticalChance_};
+    return calculateRunAttributes(base, permanentAttackBonus_, isRaging()).criticalChance;
 }
 
 int Player::rollAttackDamage(std::mt19937& random, bool& critical) const
@@ -173,6 +176,6 @@ void Player::moveWithCollision(const Vector2 delta, const Dungeon& dungeon)
 
 float Player::attackInterval() const
 {
-    return isRaging() ? baseAttackInterval_ / 1.45F : baseAttackInterval_;
+    const CombatAttributes base{baseAttack_, baseSpeed_, baseAttackInterval_, baseCriticalChance_};
+    return calculateRunAttributes(base, permanentAttackBonus_, isRaging()).attackInterval;
 }
-

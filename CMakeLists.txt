@@ -29,11 +29,16 @@ target_include_directories(dungeons_core PUBLIC src)
 add_executable(dungeons_and_cats
     src/main.cpp
     src/core/Game.cpp
+    src/entities/CarameloBoss.cpp
     src/entities/Enemy.cpp
     src/entities/Player.cpp
     src/input/InputManager.cpp
+    src/systems/AudioSystem.cpp
 )
 set_target_properties(dungeons_and_cats PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+install(TARGETS dungeons_and_cats RUNTIME DESTINATION . COMPONENT Runtime)
+install(DIRECTORY assets DESTINATION . COMPONENT Runtime)
 
 target_include_directories(dungeons_and_cats PRIVATE src)
 target_link_libraries(dungeons_and_cats PRIVATE dungeons_core raylib)
@@ -65,3 +70,23 @@ else()
 endif()
 
 add_test(NAME dungeons_core_tests COMMAND dungeons_core_tests)
+
+add_executable(dungeons_gameplay_tests
+    tests/GameplayTests.cpp
+    src/entities/CarameloBoss.cpp
+    src/entities/Enemy.cpp
+)
+target_include_directories(dungeons_gameplay_tests PRIVATE src)
+target_link_libraries(dungeons_gameplay_tests PRIVATE dungeons_core raylib)
+
+if(MINGW)
+    target_link_options(dungeons_gameplay_tests PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
+if(MSVC)
+    target_compile_options(dungeons_gameplay_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(dungeons_gameplay_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME dungeons_gameplay_tests COMMAND dungeons_gameplay_tests)

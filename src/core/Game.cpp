@@ -40,6 +40,11 @@ Color itemColor(const ItemType type)
 
 Game::~Game()
 {
+    audio_.shutdown();
+    if (titleBackground_.id != 0U)
+    {
+        UnloadTexture(titleBackground_);
+    }
     if (renderTarget_.id != 0U)
     {
         UnloadRenderTexture(renderTarget_);
@@ -74,6 +79,17 @@ void Game::initialize()
     renderTarget_ = LoadRenderTexture(constants::kInternalWidth, constants::kInternalHeight);
     SetTextureFilter(renderTarget_.texture, TEXTURE_FILTER_POINT);
     input_.setDeadZone(constants::kGamepadDeadZone);
+    audio_.initialize();
+    const char* titlePath = "assets/ui/title-background.png";
+    if (!FileExists(titlePath) && FileExists("../../assets/ui/title-background.png"))
+    {
+        titlePath = "../../assets/ui/title-background.png";
+    }
+    if (FileExists(titlePath))
+    {
+        titleBackground_ = LoadTexture(titlePath);
+        SetTextureFilter(titleBackground_, TEXTURE_FILTER_POINT);
+    }
 
     camera_.offset = Vector2{constants::kInternalWidth * 0.5F, constants::kInternalHeight * 0.5F};
     camera_.zoom = 1.0F;
@@ -102,7 +118,9 @@ void Game::populateDungeon()
     worldItems_.clear();
     trashCans_.clear();
     scratchers_.clear();
+    boss_.reset(roomWorldCenter(dungeon_.bossRoomId()), dungeon_.bossRoomId());
 
+    const auto distances = dungeon_.graph().breadthFirstDistances(dungeon_.startRoomId());
     for (const Room& room : dungeon_.rooms())
     {
         if (room.type == RoomType::Start || room.type == RoomType::Boss)
@@ -113,8 +131,22 @@ void Game::populateDungeon()
         const Vector2 center = roomWorldCenter(room.id);
         if (room.type == RoomType::Combat)
         {
-            enemies_.emplace_back(EnemyType::Rat, Vector2{center.x - 20.0F, center.y}, room.id);
-            enemies_.emplace_back(EnemyType::Rat, Vector2{center.x + 22.0F, center.y + 12.0F}, room.id);
+            const int depth = distances[static_cast<std::size_t>(room.id)];
+            if (depth >= 4)
+            {
+                enemies_.emplace_back(EnemyType::StrayDog, center, room.id);
+                enemies_.emplace_back(EnemyType::Rat, Vector2{center.x + 30.0F, center.y + 12.0F}, room.id);
+            }
+            else if (depth >= 2)
+            {
+                enemies_.emplace_back(EnemyType::Bird, Vector2{center.x - 22.0F, center.y}, room.id);
+                enemies_.emplace_back(EnemyType::Rat, Vector2{center.x + 24.0F, center.y + 12.0F}, room.id);
+            }
+            else
+            {
+                enemies_.emplace_back(EnemyType::Rat, Vector2{center.x - 20.0F, center.y}, room.id);
+                enemies_.emplace_back(EnemyType::Rat, Vector2{center.x + 22.0F, center.y + 12.0F}, room.id);
+            }
         }
         else if (room.type == RoomType::Treasure)
         {
@@ -135,6 +167,7 @@ void Game::populateDungeon()
 
 void Game::update(const float deltaTime)
 {
+    audio_.updateAmbient(state_ != GameState::Paused && state_ != GameState::GameOver && state_ != GameState::Victory);
     if (input_.isActionPressed(GameAction::ToggleDebug))
     {
         showDebug_ = !showDebug_;
@@ -181,11 +214,13 @@ void Game::updatePlaying(const float deltaTime)
 
     if (input_.isActionPressed(GameAction::UseSachet) && player_.useSachet())
     {
+        audio_.playPickup();
         setToast("Sache consumido: HP recuperado");
         spawnParticles(player_.position(), Color{242, 91, 131, 255}, 12);
     }
     if (input_.isActionPressed(GameAction::UseCatnip) && player_.useCatnip())
     {
+        audio_.playRage();
         setToast("FURIA FELINA!");
         spawnParticles(player_.position(), Color{91, 214, 120, 255}, 20, 70.0F);
     }
@@ -205,10 +240,31 @@ void Game::updatePlaying(const float deltaTime)
             enemy.markDamageApplied();
             if (player_.takeDamage(enemy.damage()))
             {
+                audio_.playHit();
                 spawnParticles(player_.position(), Color{226, 71, 64, 255}, 12, 80.0F);
                 screenShake_ = 0.18F;
                 setToast(TextFormat("-%d HP", enemy.damage()), 0.9F);
             }
+        }
+    }
+
+    if (currentRoomId_ == boss_.roomId() && !boss_.engaged())
+    {
+        boss_.engage();
+        audio_.playBossCue();
+        setToast("CARAMELO, O REI DAS RUAS", 3.0F);
+        screenShake_ = 0.35F;
+    }
+    boss_.update(player_.position(), dungeon_, deltaTime);
+    if (boss_.attackHits(player_.collider()))
+    {
+        boss_.markDamageApplied();
+        if (player_.takeDamage(boss_.damage()))
+        {
+            audio_.playHit();
+            spawnParticles(player_.position(), Color{244, 68, 61, 255}, 20, 105.0F);
+            screenShake_ = 0.30F;
+            setToast(TextFormat("Caramelo: -%d HP", boss_.damage()), 1.0F);
         }
     }
 
@@ -230,6 +286,8 @@ void Game::processCombat()
     {
         return;
     }
+
+    audio_.playAttack();
 
     bool hitSomething = false;
     for (Enemy& enemy : enemies_)
@@ -253,6 +311,24 @@ void Game::processCombat()
         }
     }
 
+
+    if (boss_.engaged() && !boss_.isDead() && CheckCollisionRecs(player_.attackHitbox(), boss_.collider()))
+    {
+        bool critical = false;
+        const int damage = player_.rollAttackDamage(random_, critical);
+        const bool killed = boss_.takeDamage(damage);
+        hitSomething = true;
+        spawnParticles(boss_.position(), critical ? YELLOW : Color{255, 174, 79, 255}, critical ? 20 : 10, 80.0F);
+        setToast(critical ? TextFormat("CRITICO NO CHEFE! %d", damage) : TextFormat("Caramelo: -%d", damage), 0.85F);
+        if (killed)
+        {
+            audio_.playVictory();
+            spawnParticles(boss_.position(), Color{255, 202, 89, 255}, 70, 130.0F);
+            screenShake_ = 0.8F;
+            state_ = GameState::Victory;
+        }
+    }
+
     const Vector2 slashPosition{player_.position().x + player_.direction().x * 15.0F, player_.position().y + player_.direction().y * 15.0F};
     spawnParticles(slashPosition, Color{255, 220, 152, 255}, hitSomething ? 6 : 3, 35.0F);
 }
@@ -265,6 +341,7 @@ void Game::processPickups()
         {
             item.active = false;
             player_.inventory().add(item.type);
+            audio_.playPickup();
             setToast(std::string(itemName(item.type)) + " coletado");
             spawnParticles(item.position, itemColor(item.type), 10);
         }
@@ -287,6 +364,7 @@ void Game::processInteractions()
         if (!trash.opened && distanceSquared(trash.position, player_.position()) < 34.0F * 34.0F)
         {
             trash.opened = true;
+            audio_.playPickup();
             std::uniform_int_distribution<int> lootRoll(0, 99);
             const int roll = lootRoll(random_);
             if (roll < 55)
@@ -318,6 +396,7 @@ void Game::processInteractions()
         if (!scratcher.used && distanceSquared(scratcher.position, player_.position()) < 36.0F * 36.0F)
         {
             scratcher.used = true;
+            audio_.playRage();
             player_.addPermanentAttack(2);
             setToast("Unhas afiadas! ATQ +2", 2.5F);
             spawnParticles(scratcher.position, Color{255, 174, 79, 255}, 18, 65.0F);
@@ -405,6 +484,14 @@ void Game::renderTitle() const
     }
     DrawRectangle(0, 292, constants::kInternalWidth, 68, Color{37, 39, 43, 255});
     DrawLine(0, 319, constants::kInternalWidth, 319, Color{205, 177, 84, 190});
+    if (titleBackground_.id != 0U)
+    {
+        const Rectangle source{0.0F, 0.0F, static_cast<float>(titleBackground_.width), static_cast<float>(titleBackground_.height)};
+        const Rectangle destination{0.0F, 0.0F, static_cast<float>(constants::kInternalWidth), static_cast<float>(constants::kInternalHeight)};
+        DrawTexturePro(titleBackground_, source, destination, Vector2{}, 0.0F, WHITE);
+        DrawRectangleGradientH(0, 0, 430, constants::kInternalHeight, Fade(BLACK, 0.78F), BLANK);
+        DrawRectangle(0, 238, constants::kInternalWidth, 68, Fade(BLACK, 0.58F));
+    }
     DrawText("DUNGEONS", 43, 40, 48, Color{255, 183, 69, 255});
     DrawText("& CATS", 95, 91, 44, Color{255, 221, 151, 255});
     DrawText("UM ROGUELITE PELAS RUAS", 49, 143, 13, Color{181, 195, 214, 255});
@@ -415,14 +502,17 @@ void Game::renderTitle() const
     DrawText("SHIFT  esquiva   Q  sache   R  catnip   ESC  pause", 43, 266, 10, LIGHTGRAY);
     DrawText("F3  diagnostico do controle", 43, 282, 10, Color{117, 201, 255, 255});
 
-    const float catX = 503.0F;
-    const float catY = 285.0F;
-    DrawCircle(static_cast<int>(catX), static_cast<int>(catY), 17.0F, Color{230, 112, 35, 255});
-    DrawTriangle(Vector2{catX - 14, catY - 11}, Vector2{catX - 6, catY - 28}, Vector2{catX - 1, catY - 12}, Color{238, 133, 48, 255});
-    DrawTriangle(Vector2{catX + 2, catY - 12}, Vector2{catX + 10, catY - 28}, Vector2{catX + 15, catY - 9}, Color{238, 133, 48, 255});
-    DrawCircle(static_cast<int>(catX - 6), static_cast<int>(catY - 2), 2.0F, Color{49, 50, 38, 255});
-    DrawCircle(static_cast<int>(catX + 6), static_cast<int>(catY - 2), 2.0F, Color{49, 50, 38, 255});
-    DrawLineEx(Vector2{catX + 14, catY + 8}, Vector2{catX + 34, catY + 2}, 4.0F, Color{218, 96, 30, 255});
+    if (titleBackground_.id == 0U)
+    {
+        const float catX = 503.0F;
+        const float catY = 285.0F;
+        DrawCircle(static_cast<int>(catX), static_cast<int>(catY), 17.0F, Color{230, 112, 35, 255});
+        DrawTriangle(Vector2{catX - 14, catY - 11}, Vector2{catX - 6, catY - 28}, Vector2{catX - 1, catY - 12}, Color{238, 133, 48, 255});
+        DrawTriangle(Vector2{catX + 2, catY - 12}, Vector2{catX + 10, catY - 28}, Vector2{catX + 15, catY - 9}, Color{238, 133, 48, 255});
+        DrawCircle(static_cast<int>(catX - 6), static_cast<int>(catY - 2), 2.0F, Color{49, 50, 38, 255});
+        DrawCircle(static_cast<int>(catX + 6), static_cast<int>(catY - 2), 2.0F, Color{49, 50, 38, 255});
+        DrawLineEx(Vector2{catX + 14, catY + 8}, Vector2{catX + 34, catY + 2}, 4.0F, Color{218, 96, 30, 255});
+    }
 }
 
 void Game::renderWorld() const
@@ -431,6 +521,7 @@ void Game::renderWorld() const
     renderDungeon();
     renderObjects();
     renderEnemies();
+    renderBoss();
     renderPlayer();
     renderParticles();
     EndMode2D();
@@ -550,13 +641,37 @@ void Game::renderEnemies() const
             DrawLineEx(position, Vector2{position.x + enemy.facing().x * 28.0F, position.y + enemy.facing().y * 28.0F}, 2.0F, Color{244, 72, 74, 210});
         }
 
-        DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y + 7), 11.0F, 5.0F, Fade(BLACK, 0.35F));
-        const Color body = enemy.state() == EnemyState::Hurt ? WHITE : Color{133, 137, 146, 255};
-        DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y), 10.0F, 7.0F, body);
-        DrawCircle(static_cast<int>(position.x + enemy.facing().x * 7.0F), static_cast<int>(position.y + enemy.facing().y * 5.0F - 1.0F), 5.0F, Color{154, 157, 166, 255});
-        DrawCircle(static_cast<int>(position.x - 4), static_cast<int>(position.y - 6), 3.0F, Color{190, 142, 151, 255});
-        DrawLineEx(Vector2{position.x - 9.0F, position.y + 2.0F}, Vector2{position.x - 20.0F, position.y + 8.0F}, 2.0F, Color{190, 142, 151, 255});
-        DrawCircle(static_cast<int>(position.x + enemy.facing().x * 10.0F), static_cast<int>(position.y - 2), 1.5F, Color{31, 28, 33, 255});
+        DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y + 7), enemy.type() == EnemyType::StrayDog ? 18.0F : 11.0F, 5.0F, Fade(BLACK, 0.35F));
+        const bool hurt = enemy.state() == EnemyState::Hurt;
+        if (enemy.type() == EnemyType::Rat)
+        {
+            const Color body = hurt ? WHITE : Color{133, 137, 146, 255};
+            DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y), 10.0F, 7.0F, body);
+            DrawCircle(static_cast<int>(position.x + enemy.facing().x * 7.0F), static_cast<int>(position.y + enemy.facing().y * 5.0F - 1.0F), 5.0F, Color{154, 157, 166, 255});
+            DrawCircle(static_cast<int>(position.x - 4), static_cast<int>(position.y - 6), 3.0F, Color{190, 142, 151, 255});
+            DrawLineEx(Vector2{position.x - 9.0F, position.y + 2.0F}, Vector2{position.x - 20.0F, position.y + 8.0F}, 2.0F, Color{190, 142, 151, 255});
+            DrawCircle(static_cast<int>(position.x + enemy.facing().x * 10.0F), static_cast<int>(position.y - 2), 1.5F, Color{31, 28, 33, 255});
+        }
+        else if (enemy.type() == EnemyType::Bird)
+        {
+            const float hover = std::sin(static_cast<float>(GetTime()) * 8.0F + position.x) * 2.0F;
+            const Color body = hurt ? WHITE : Color{61, 135, 171, 255};
+            DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y - 3.0F + hover), 9.0F, 7.0F, body);
+            DrawTriangle(Vector2{position.x - 3, position.y - 2 + hover}, Vector2{position.x - 15, position.y - 9 + hover}, Vector2{position.x - 8, position.y + 5 + hover}, Color{80, 163, 194, 255});
+            DrawTriangle(Vector2{position.x + 2, position.y - 2 + hover}, Vector2{position.x + 14, position.y - 9 + hover}, Vector2{position.x + 8, position.y + 5 + hover}, Color{80, 163, 194, 255});
+            DrawTriangle(Vector2{position.x + enemy.facing().x * 8.0F, position.y - 3 + hover}, Vector2{position.x + enemy.facing().x * 14.0F, position.y + hover}, Vector2{position.x + enemy.facing().x * 8.0F, position.y + 2 + hover}, Color{247, 191, 60, 255});
+        }
+        else
+        {
+            const Color body = hurt ? WHITE : Color{162, 111, 63, 255};
+            DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y), 17.0F, 11.0F, body);
+            const Vector2 head{position.x + enemy.facing().x * 13.0F, position.y + enemy.facing().y * 7.0F - 4.0F};
+            DrawCircleV(head, 9.0F, Color{181, 126, 70, 255});
+            DrawTriangle(Vector2{head.x - 7, head.y - 5}, Vector2{head.x - 5, head.y - 14}, Vector2{head.x, head.y - 7}, Color{91, 61, 45, 255});
+            DrawTriangle(Vector2{head.x + 1, head.y - 7}, Vector2{head.x + 7, head.y - 14}, Vector2{head.x + 8, head.y - 4}, Color{91, 61, 45, 255});
+            DrawCircle(static_cast<int>(head.x + enemy.facing().x * 8.0F), static_cast<int>(head.y), 2.0F, Color{33, 28, 25, 255});
+            DrawLineEx(Vector2{position.x - enemy.facing().x * 15.0F, position.y}, Vector2{position.x - enemy.facing().x * 25.0F, position.y - 6.0F}, 4.0F, Color{137, 89, 56, 255});
+        }
 
         if (enemy.hp() < enemy.maxHp())
         {
@@ -621,6 +736,65 @@ void Game::renderPlayer() const
     }
 }
 
+void Game::renderBoss() const
+{
+    if (!boss_.engaged() || boss_.isDead())
+    {
+        return;
+    }
+
+    const Vector2 position = boss_.position();
+    const Color warning = boss_.phaseTwo() ? Color{255, 72, 62, 255} : Color{255, 174, 70, 255};
+    if (boss_.state() == BossState::Telegraph)
+    {
+        if (boss_.attack() == BossAttack::Charge)
+        {
+            DrawLineEx(position, Vector2{position.x + boss_.attackDirection().x * 180.0F, position.y + boss_.attackDirection().y * 180.0F}, 5.0F, Fade(warning, 0.62F));
+        }
+        else if (boss_.attack() == BossAttack::Bark)
+        {
+            DrawCircleLines(static_cast<int>(position.x), static_cast<int>(position.y), 48.0F + boss_.stateTimer() * 12.0F, warning);
+            DrawCircleLines(static_cast<int>(position.x), static_cast<int>(position.y), 58.0F + boss_.stateTimer() * 12.0F, Fade(warning, 0.45F));
+        }
+        else
+        {
+            DrawRectangleLinesEx(boss_.attackCollider(), 3.0F, warning);
+        }
+        DrawText(bossAttackName(boss_.attack()), static_cast<int>(position.x) - MeasureText(bossAttackName(boss_.attack()), 9) / 2, static_cast<int>(position.y - 46), 9, warning);
+    }
+    else if (boss_.state() == BossState::Attack && boss_.attack() == BossAttack::Bark)
+    {
+        DrawRing(position, std::max(0.0F, boss_.barkRadius() - 7.0F), boss_.barkRadius(), 0.0F, 360.0F, 48, Fade(warning, 0.80F));
+    }
+
+    if (boss_.phaseTwo())
+    {
+        DrawCircleLines(static_cast<int>(position.x), static_cast<int>(position.y), 34.0F + std::sin(static_cast<float>(GetTime()) * 11.0F) * 3.0F, Fade(RED, 0.72F));
+    }
+    if (boss_.state() == BossState::PhaseTransition)
+    {
+        DrawCircleGradient(static_cast<int>(position.x), static_cast<int>(position.y), 50.0F + boss_.stateTimer() * 25.0F, Fade(RED, 0.52F), BLANK);
+    }
+
+    DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y + 17), 31.0F, 10.0F, Fade(BLACK, 0.42F));
+    DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y), 27.0F, 19.0F, Color{205, 135, 60, 255});
+    const Vector2 head{position.x + boss_.attackDirection().x * 20.0F, position.y + boss_.attackDirection().y * 11.0F - 6.0F};
+    DrawCircleV(head, 15.0F, Color{224, 151, 68, 255});
+    DrawTriangle(Vector2{head.x - 12, head.y - 8}, Vector2{head.x - 9, head.y - 24}, Vector2{head.x - 1, head.y - 11}, Color{116, 74, 45, 255});
+    DrawTriangle(Vector2{head.x + 2, head.y - 11}, Vector2{head.x + 11, head.y - 24}, Vector2{head.x + 13, head.y - 7}, Color{116, 74, 45, 255});
+    DrawCircle(static_cast<int>(head.x + boss_.attackDirection().x * 12.0F), static_cast<int>(head.y + boss_.attackDirection().y * 5.0F), 4.0F, Color{48, 35, 29, 255});
+    DrawCircle(static_cast<int>(head.x - 5), static_cast<int>(head.y - 4), 2.0F, Color{31, 30, 25, 255});
+    DrawCircle(static_cast<int>(head.x + 5), static_cast<int>(head.y - 4), 2.0F, Color{31, 30, 25, 255});
+    DrawLineEx(Vector2{position.x - 18, position.y - 12}, Vector2{position.x + 20, position.y - 12}, 4.0F, boss_.phaseTwo() ? RED : Color{49, 182, 196, 255});
+    DrawLineEx(Vector2{position.x - boss_.attackDirection().x * 24.0F, position.y}, Vector2{position.x - boss_.attackDirection().x * 39.0F, position.y - 12.0F}, 7.0F, Color{184, 112, 54, 255});
+
+    if (showDebug_)
+    {
+        DrawRectangleLinesEx(boss_.collider(), 1.0F, MAGENTA);
+        DrawText(bossStateName(boss_.state()), static_cast<int>(position.x - 22), static_cast<int>(position.y + 29), 8, MAGENTA);
+    }
+}
+
 void Game::renderParticles() const
 {
     for (const Particle& particle : particles_)
@@ -668,6 +842,15 @@ void Game::renderHud() const
         DrawText(toast_.c_str(), constants::kInternalWidth / 2 - width / 2 + 11, 332, 11, RAYWHITE);
     }
     DrawText(input_.isGamepadConnected() ? "PAD" : "KEY", 608, 344, 8, input_.isGamepadConnected() ? GREEN : GRAY);
+
+    if (boss_.engaged() && !boss_.isDead())
+    {
+        DrawRectangle(170, 60, 300, 25, Fade(BLACK, 0.86F));
+        DrawRectangle(177, 76, 286, 5, Color{66, 31, 34, 255});
+        DrawRectangle(177, 76, static_cast<int>(286.0F * boss_.hp() / boss_.maxHp()), 5, boss_.phaseTwo() ? Color{240, 67, 58, 255} : Color{219, 127, 51, 255});
+        const char* bossName = boss_.phaseTwo() ? "CARAMELO - FASE 2" : "CARAMELO, O REI DAS RUAS";
+        DrawText(bossName, constants::kInternalWidth / 2 - MeasureText(bossName, 10) / 2, 64, 10, RAYWHITE);
+    }
 }
 
 void Game::renderDebugPanel() const
@@ -679,6 +862,10 @@ void Game::renderDebugPanel() const
     DrawText(TextFormat("Player: %.0f, %.0f  HP: %d", player_.position().x, player_.position().y, player_.hp()), 16, 104, 9, LIGHTGRAY);
     DrawText(TextFormat("ATQ base+run: %d (+%d)", player_.attack(), player_.permanentAttackBonus()), 16, 118, 9, LIGHTGRAY);
     DrawText(TextFormat("Inimigos: %zu  Itens: %zu", enemies_.size(), worldItems_.size()), 16, 132, 9, LIGHTGRAY);
+    if (boss_.engaged())
+    {
+        DrawText(TextFormat("Boss: %s / %s", bossStateName(boss_.state()), bossAttackName(boss_.attack())), 16, 144, 8, MAGENTA);
+    }
     const auto path = dungeon_.graph().breadthFirstShortestPath(dungeon_.startRoomId(), dungeon_.bossRoomId());
     DrawText(TextFormat("MATRIZ: %dx%d", Dungeon::kWidth, Dungeon::kHeight), 16, 151, 9, Color{255, 190, 92, 255});
     DrawText(TextFormat("GRAFO: %d vertices", dungeon_.graph().vertexCount()), 16, 165, 9, Color{255, 190, 92, 255});
@@ -779,4 +966,3 @@ Vector2 Game::roomWorldCenter(const int roomId) const
     const GridPoint center = dungeon_.roomCenter(roomId);
     return Vector2{static_cast<float>(center.x * Dungeon::kTileSize + Dungeon::kTileSize / 2), static_cast<float>(center.y * Dungeon::kTileSize + Dungeon::kTileSize / 2)};
 }
-
