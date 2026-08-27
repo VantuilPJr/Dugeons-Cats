@@ -19,14 +19,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
+add_library(dungeons_core STATIC
+    src/dungeon/Dungeon.cpp
+    src/dungeon/DungeonGenerator.cpp
+    src/dungeon/DungeonGraph.cpp
+)
+target_include_directories(dungeons_core PUBLIC src)
+
 add_executable(dungeons_and_cats
     src/main.cpp
     src/core/Game.cpp
     src/input/InputManager.cpp
 )
+set_target_properties(dungeons_and_cats PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 target_include_directories(dungeons_and_cats PRIVATE src)
-target_link_libraries(dungeons_and_cats PRIVATE raylib)
+target_link_libraries(dungeons_and_cats PRIVATE dungeons_core raylib)
 
 if(MSVC)
     target_compile_options(dungeons_and_cats PRIVATE /W4 /permissive-)
@@ -37,3 +45,21 @@ endif()
 if(MINGW)
     target_link_options(dungeons_and_cats PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
+
+enable_testing()
+add_executable(dungeons_core_tests tests/CoreTests.cpp)
+target_link_libraries(dungeons_core_tests PRIVATE dungeons_core)
+
+if(MINGW)
+    target_link_options(dungeons_core_tests PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
+if(MSVC)
+    target_compile_options(dungeons_core PRIVATE /W4 /permissive-)
+    target_compile_options(dungeons_core_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(dungeons_core PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(dungeons_core_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME dungeons_core_tests COMMAND dungeons_core_tests)
