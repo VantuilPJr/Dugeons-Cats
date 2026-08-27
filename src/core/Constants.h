@@ -8,8 +8,8 @@ inline constexpr int kWindowWidth = 1280;
 inline constexpr int kWindowHeight = 720;
 inline constexpr int kTargetFps = 60;
 
-inline constexpr float kPlayerSize = 24.0F;
-inline constexpr float kPlayerSpeed = 120.0F;
+inline constexpr float kPlayerSize = 18.0F;
+inline constexpr float kPlayerSpeed = 105.0F;
 inline constexpr float kGamepadDeadZone = 0.20F;
 } // namespace constants
 

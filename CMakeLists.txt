@@ -29,6 +29,8 @@ target_include_directories(dungeons_core PUBLIC src)
 add_executable(dungeons_and_cats
     src/main.cpp
     src/core/Game.cpp
+    src/entities/Enemy.cpp
+    src/entities/Player.cpp
     src/input/InputManager.cpp
 )
 set_target_properties(dungeons_and_cats PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
