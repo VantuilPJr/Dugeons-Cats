@@ -65,7 +65,7 @@ cmake --build build --config Debug
 O executável de desenvolvimento fica em:
 
 ```powershell
-.\build\bin\dungeons_and_cats.exe
+.\build\dungeons_and_cats.exe
 ```
 
 ## Testar

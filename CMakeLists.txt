@@ -35,7 +35,7 @@ add_executable(dungeons_and_cats
     src/input/InputManager.cpp
     src/systems/AudioSystem.cpp
 )
-set_target_properties(dungeons_and_cats PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set_target_properties(dungeons_and_cats PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 install(TARGETS dungeons_and_cats RUNTIME DESTINATION . COMPONENT Runtime)
 install(DIRECTORY assets DESTINATION . COMPONENT Runtime)
