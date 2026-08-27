@@ -1,0 +1,9 @@
+/build/
+/out/
+/.tools/
+/.cache/
+/.idea/
+/.vscode/
+*.user
+*.suo
+*.VC.db
