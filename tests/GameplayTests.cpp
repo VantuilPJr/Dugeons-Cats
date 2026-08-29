@@ -22,7 +22,9 @@ void expect(const bool condition, const std::string& message)
 Vector2 worldCenter(const Dungeon& dungeon, const int roomId)
 {
     const GridPoint center = dungeon.roomCenter(roomId);
-    return Vector2{static_cast<float>(center.x * Dungeon::kTileSize + 8), static_cast<float>(center.y * Dungeon::kTileSize + 8)};
+    const float halfTile = Dungeon::kTileSize * 0.5F;
+    return Vector2{center.x * static_cast<float>(Dungeon::kTileSize) + halfTile,
+                   center.y * static_cast<float>(Dungeon::kTileSize) + halfTile};
 }
 } // namespace
 
@@ -68,4 +70,3 @@ int main()
     std::cerr << failures << " gameplay test(s) failed.\n";
     return EXIT_FAILURE;
 }
-

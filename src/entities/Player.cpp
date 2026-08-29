@@ -36,6 +36,7 @@ void Player::reset(const Vector2 position)
     rageTimer_ = 0.0F;
     rageCooldown_ = 0.0F;
     attackStarted_ = false;
+    isMoving_ = false;
     inventory_.clear();
     inventory_.add(ItemType::Sachet);
 }
@@ -63,6 +64,7 @@ void Player::update(const InputManager& input, const Dungeon& dungeon, const flo
         dodgeTimer_ = 0.20F;
         dodgeCooldown_ = 0.85F;
     }
+    isMoving_ = length(movement) > 0.05F || dodgeTimer_ > 0.0F;
 
     if (input.isActionPressed(GameAction::Attack) && attackCooldown_ <= 0.0F && dodgeTimer_ <= 0.0F)
     {

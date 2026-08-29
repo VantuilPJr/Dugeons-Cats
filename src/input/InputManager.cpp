@@ -166,6 +166,9 @@ bool InputManager::queryAction(const GameAction action, const InputState state) 
         return queryKeyboard(KEY_Q, state) || queryGamepadButton(GAMEPAD_BUTTON_LEFT_TRIGGER_1, state);
     case GameAction::UseCatnip:
         return queryKeyboard(KEY_R, state) || queryGamepadButton(GAMEPAD_BUTTON_RIGHT_TRIGGER_1, state);
+    case GameAction::Inventory:
+        return queryKeyboard(KEY_TAB, state) || queryKeyboard(KEY_I, state)
+            || queryGamepadButton(GAMEPAD_BUTTON_RIGHT_FACE_UP, state);
     case GameAction::Pause:
         return queryKeyboard(KEY_ESCAPE, state) || queryGamepadButton(GAMEPAD_BUTTON_MIDDLE_RIGHT, state);
     case GameAction::ToggleDebug:

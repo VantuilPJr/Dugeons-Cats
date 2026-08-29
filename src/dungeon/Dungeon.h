@@ -18,9 +18,11 @@ enum class TileType : std::uint8_t
 class Dungeon
 {
 public:
-    static constexpr int kWidth = 64;
-    static constexpr int kHeight = 40;
-    static constexpr int kTileSize = 16;
+    // Distrito amplo: continua sendo uma dungeon de um piso, mas com escala
+    // suficiente para funcionar como uma zona urbana aberta e conectada.
+    static constexpr int kWidth = 112;
+    static constexpr int kHeight = 72;
+    static constexpr int kTileSize = 24;
 
     using TileRow = std::array<TileType, kWidth>;
     using TileMatrix = std::array<TileRow, kHeight>;
@@ -53,4 +55,3 @@ private:
     int bossRoomId_ = 0;
     std::uint32_t seed_ = 0;
 };
-

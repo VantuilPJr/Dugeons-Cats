@@ -26,6 +26,7 @@ public:
     [[nodiscard]] bool isDodging() const { return dodgeTimer_ > 0.0F; }
     [[nodiscard]] bool isInvulnerable() const { return invulnerabilityTimer_ > 0.0F || isDodging(); }
     [[nodiscard]] bool isRaging() const { return rageTimer_ > 0.0F; }
+    [[nodiscard]] bool isMoving() const { return isMoving_; }
     [[nodiscard]] bool isDead() const { return hp_ <= 0; }
 
     [[nodiscard]] int hp() const { return hp_; }
@@ -72,7 +73,7 @@ private:
     float rageTimer_ = 0.0F;
     float rageCooldown_ = 0.0F;
     bool attackStarted_ = false;
+    bool isMoving_ = false;
 
     Inventory inventory_;
 };
-

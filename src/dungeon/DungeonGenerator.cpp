@@ -10,14 +10,14 @@ Dungeon DungeonGenerator::generate(const std::uint32_t seed) const
     Dungeon dungeon;
     dungeon.setSeed(seed);
     std::mt19937 random(seed);
-    std::uniform_int_distribution<int> roomWidth(8, 13);
-    std::uniform_int_distribution<int> roomHeight(6, 10);
-    std::uniform_int_distribution<int> roomX(2, Dungeon::kWidth - 15);
-    std::uniform_int_distribution<int> roomY(2, Dungeon::kHeight - 12);
+    std::uniform_int_distribution<int> roomWidth(9, 16);
+    std::uniform_int_distribution<int> roomHeight(7, 12);
+    std::uniform_int_distribution<int> roomX(2, Dungeon::kWidth - 18);
+    std::uniform_int_distribution<int> roomY(2, Dungeon::kHeight - 14);
 
     auto& rooms = dungeon.rooms();
-    constexpr int targetRoomCount = 12;
-    for (int attempt = 0; attempt < 500 && static_cast<int>(rooms.size()) < targetRoomCount; ++attempt)
+    constexpr int targetRoomCount = 24;
+    for (int attempt = 0; attempt < 1600 && static_cast<int>(rooms.size()) < targetRoomCount; ++attempt)
     {
         Room candidate;
         candidate.id = static_cast<int>(rooms.size());
@@ -35,8 +35,8 @@ Dungeon DungeonGenerator::generate(const std::uint32_t seed) const
     if (rooms.size() < 6)
     {
         rooms.clear();
-        const GridPoint positions[]{{3, 3}, {20, 3}, {38, 3}, {3, 23}, {20, 23}, {39, 23}};
-        for (int index = 0; index < 6; ++index)
+        const GridPoint positions[]{{3, 3}, {26, 3}, {50, 3}, {74, 3}, {3, 29}, {27, 29}, {52, 29}, {76, 29}};
+        for (int index = 0; index < 8; ++index)
         {
             Room fallback;
             fallback.id = index;
@@ -74,7 +74,7 @@ Dungeon DungeonGenerator::generate(const std::uint32_t seed) const
     if (rooms.size() > 4)
     {
         std::uniform_int_distribution<int> roomIndex(0, static_cast<int>(rooms.size()) - 1);
-        for (int extra = 0; extra < 3; ++extra)
+        for (int extra = 0; extra < 10; ++extra)
         {
             const int first = roomIndex(random);
             const int second = roomIndex(random);
@@ -203,9 +203,10 @@ void DungeonGenerator::carveCorridor(Dungeon& dungeon, GridPoint first, GridPoin
 
 void DungeonGenerator::carveCorridorFloor(Dungeon& dungeon, const int x, const int y)
 {
-    for (int offset = -1; offset <= 1; ++offset)
+    // Ruas largas conectam as quadras e dão ao piso a leitura de distrito aberto.
+    for (int offset = -2; offset <= 2; ++offset)
     {
-        for (int side = -2; side <= 2; ++side)
+        for (int side = -3; side <= 3; ++side)
         {
             if (dungeon.tileAt(x + side, y + offset) == TileType::Empty)
             {
@@ -218,7 +219,7 @@ void DungeonGenerator::carveCorridorFloor(Dungeon& dungeon, const int x, const i
         }
     }
 
-    for (int offset = -1; offset <= 1; ++offset)
+    for (int offset = -2; offset <= 2; ++offset)
     {
         dungeon.setTile(x + offset, y, TileType::Floor);
         dungeon.setTile(x, y + offset, TileType::Floor);

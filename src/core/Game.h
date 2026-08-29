@@ -58,6 +58,7 @@ private:
     void renderPlayer() const;
     void renderParticles() const;
     void renderHud() const;
+    void renderInventoryBag() const;
     void renderDebugPanel() const;
     void renderStateOverlay() const;
     void renderToWindow() const;
@@ -71,6 +72,10 @@ private:
     AudioSystem audio_;
     RenderTexture2D renderTarget_{};
     Texture2D titleBackground_{};
+    Texture2D playerAtlas_{};
+    Texture2D enemyAtlas_{};
+    Texture2D urbanAtlas_{};
+    Texture2D propsAtlas_{};
     Camera2D camera_{};
     DungeonGenerator generator_;
     Dungeon dungeon_;
@@ -91,4 +96,5 @@ private:
     float screenShake_ = 0.0F;
     bool initialized_ = false;
     bool showDebug_ = false;
+    bool inventoryOpen_ = false;
 };

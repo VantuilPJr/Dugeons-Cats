@@ -37,6 +37,12 @@ add_executable(dungeons_and_cats
 )
 set_target_properties(dungeons_and_cats PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+configure_file(
+    "${CMAKE_SOURCE_DIR}/assets/ui/title-background.png"
+    "${CMAKE_BINARY_DIR}/assets/ui/title-background.png"
+    COPYONLY
+)
+
 install(TARGETS dungeons_and_cats RUNTIME DESTINATION . COMPONENT Runtime)
 install(DIRECTORY assets DESTINATION . COMPONENT Runtime)
 

@@ -11,7 +11,7 @@ enum class GameAction
     Interact,
     UseSachet,
     UseCatnip,
+    Inventory,
     Pause,
     ToggleDebug,
 };
-

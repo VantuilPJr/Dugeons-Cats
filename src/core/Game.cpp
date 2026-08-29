@@ -4,8 +4,11 @@
 #include "input/GameAction.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <utility>
 
@@ -36,6 +39,52 @@ Color itemColor(const ItemType type)
     }
     return WHITE;
 }
+
+std::string findAssetPath(const std::filesystem::path& relativePath)
+{
+    const std::filesystem::path executableDirectory = GetApplicationDirectory();
+    const std::array candidates{
+        executableDirectory / relativePath,
+        executableDirectory / ".." / relativePath,
+        relativePath,
+        std::filesystem::path{".."} / relativePath,
+    };
+
+    for (const std::filesystem::path& candidate : candidates)
+    {
+        const std::string path = candidate.lexically_normal().string();
+        if (FileExists(path.c_str()))
+        {
+            return path;
+        }
+    }
+
+    return {};
+}
+
+Rectangle atlasSource(const Texture2D texture, const int column, const int row, const bool flipX = false)
+{
+    constexpr float columns = 6.0F;
+    constexpr float rows = 4.0F;
+    const float width = static_cast<float>(texture.width) / columns;
+    const float height = static_cast<float>(texture.height) / rows;
+    if (flipX)
+    {
+        return Rectangle{(static_cast<float>(column) + 1.0F) * width, static_cast<float>(row) * height, -width, height};
+    }
+    return Rectangle{static_cast<float>(column) * width, static_cast<float>(row) * height, width, height};
+}
+
+void drawAtlasSprite(const Texture2D texture, const int column, const int row, const Vector2 center,
+                     const float width, const float height, const bool flipX = false, const Color tint = WHITE)
+{
+    if (texture.id == 0U)
+    {
+        return;
+    }
+    const Rectangle destination{center.x - width * 0.5F, center.y - height * 0.5F, width, height};
+    DrawTexturePro(texture, atlasSource(texture, column, row, flipX), destination, Vector2{}, 0.0F, tint);
+}
 } // namespace
 
 Game::~Game()
@@ -44,6 +93,13 @@ Game::~Game()
     if (titleBackground_.id != 0U)
     {
         UnloadTexture(titleBackground_);
+    }
+    for (Texture2D* texture : {&playerAtlas_, &enemyAtlas_, &urbanAtlas_, &propsAtlas_})
+    {
+        if (texture->id != 0U)
+        {
+            UnloadTexture(*texture);
+        }
     }
     if (renderTarget_.id != 0U)
     {
@@ -59,6 +115,53 @@ Game::~Game()
 int Game::run()
 {
     initialize();
+    if (const char* captureDirectory = std::getenv("DUNGEONS_CATS_CAPTURE_DIR"))
+    {
+        const std::filesystem::path directory = captureDirectory;
+        std::filesystem::create_directories(directory);
+        const auto saveInternalCapture = [this, &directory](const char* fileName) {
+            Image image = LoadImageFromTexture(renderTarget_.texture);
+            ImageFlipVertical(&image);
+            ImageResizeNN(&image, constants::kWindowWidth, constants::kWindowHeight);
+            const std::string output = (directory / fileName).string();
+            ExportImage(image, output.c_str());
+            UnloadImage(image);
+        };
+        startNewRun();
+        render();
+        render();
+        saveInternalCapture("world.png");
+        inventoryOpen_ = true;
+        render();
+        render();
+        saveInternalCapture("bag.png");
+        auto enemyToCapture = std::find_if(enemies_.begin(), enemies_.end(), [](const Enemy& enemy) {
+            return enemy.type() == EnemyType::StrayDog;
+        });
+        if (enemyToCapture == enemies_.end() && !enemies_.empty())
+        {
+            enemyToCapture = enemies_.begin();
+        }
+        inventoryOpen_ = false;
+        if (enemyToCapture != enemies_.end())
+        {
+            player_.reset(enemyToCapture->position());
+            currentRoomId_ = enemyToCapture->roomId();
+            updateCamera();
+            render();
+            render();
+            saveInternalCapture("enemies.png");
+        }
+        inventoryOpen_ = false;
+        player_.reset(roomWorldCenter(dungeon_.bossRoomId()));
+        currentRoomId_ = dungeon_.bossRoomId();
+        boss_.engage();
+        updateCamera();
+        render();
+        render();
+        saveInternalCapture("boss.png");
+        return 0;
+    }
     while (!WindowShouldClose())
     {
         input_.update();
@@ -80,16 +183,31 @@ void Game::initialize()
     SetTextureFilter(renderTarget_.texture, TEXTURE_FILTER_POINT);
     input_.setDeadZone(constants::kGamepadDeadZone);
     audio_.initialize();
-    const char* titlePath = "assets/ui/title-background.png";
-    if (!FileExists(titlePath) && FileExists("../../assets/ui/title-background.png"))
+    const std::string titlePath = findAssetPath("assets/ui/title-background.png");
+    if (!titlePath.empty())
     {
-        titlePath = "../../assets/ui/title-background.png";
+        titleBackground_ = LoadTexture(titlePath.c_str());
+        if (titleBackground_.id != 0U)
+        {
+            SetTextureFilter(titleBackground_, TEXTURE_FILTER_POINT);
+        }
     }
-    if (FileExists(titlePath))
-    {
-        titleBackground_ = LoadTexture(titlePath);
-        SetTextureFilter(titleBackground_, TEXTURE_FILTER_POINT);
-    }
+
+    const auto loadAtlas = [](Texture2D& destination, const char* path) {
+        const std::string resolved = findAssetPath(path);
+        if (!resolved.empty())
+        {
+            destination = LoadTexture(resolved.c_str());
+            if (destination.id != 0U)
+            {
+                SetTextureFilter(destination, TEXTURE_FILTER_POINT);
+            }
+        }
+    };
+    loadAtlas(playerAtlas_, "assets/sprites/ginger-cat-atlas.png");
+    loadAtlas(enemyAtlas_, "assets/sprites/street-enemies-atlas.png");
+    loadAtlas(urbanAtlas_, "assets/tiles/brazilian-urban-atlas.png");
+    loadAtlas(propsAtlas_, "assets/sprites/urban-props-items-atlas.png");
 
     camera_.offset = Vector2{constants::kInternalWidth * 0.5F, constants::kInternalHeight * 0.5F};
     camera_.zoom = 1.0F;
@@ -107,6 +225,7 @@ void Game::startNewRun()
     particles_.clear();
     currentRoomId_ = dungeon_.startRoomId();
     screenShake_ = 0.0F;
+    inventoryOpen_ = false;
     setToast("Explore as ruas. Encontre o Rei das Ruas.", 3.0F);
     state_ = GameState::Playing;
     updateCamera();
@@ -182,7 +301,20 @@ void Game::update(const float deltaTime)
         }
         break;
     case GameState::Playing:
-        if (input_.isActionPressed(GameAction::Pause))
+        if (inventoryOpen_)
+        {
+            if (input_.isActionPressed(GameAction::Inventory)
+                || input_.isActionPressed(GameAction::Pause)
+                || input_.isActionPressed(GameAction::Dodge))
+            {
+                inventoryOpen_ = false;
+            }
+        }
+        else if (input_.isActionPressed(GameAction::Inventory))
+        {
+            inventoryOpen_ = true;
+        }
+        else if (input_.isActionPressed(GameAction::Pause))
         {
             state_ = GameState::Paused;
         }
@@ -453,6 +585,10 @@ void Game::render()
     {
         renderWorld();
         renderHud();
+        if (inventoryOpen_)
+        {
+            renderInventoryBag();
+        }
         if (showDebug_)
         {
             renderDebugPanel();
@@ -499,8 +635,8 @@ void Game::renderTitle() const
     DrawRectangle(46, 189, 270, 29, Fade(BLACK, 0.55F));
     DrawText("ENTER / QUADRADO: NOVA RUN", 61, 198, 12, RAYWHITE);
     DrawText("WASD  mover   J/ESPACO  atacar   E  interagir", 43, 250, 10, LIGHTGRAY);
-    DrawText("SHIFT  esquiva   Q  sache   R  catnip   ESC  pause", 43, 266, 10, LIGHTGRAY);
-    DrawText("F3  diagnostico do controle", 43, 282, 10, Color{117, 201, 255, 255});
+    DrawText("SHIFT esquiva   Q sache   R catnip   TAB/I bolsa", 43, 266, 10, LIGHTGRAY);
+    DrawText("ESC pause   F3 diagnostico do controle", 43, 282, 10, Color{117, 201, 255, 255});
 
     if (titleBackground_.id == 0U)
     {
@@ -529,16 +665,77 @@ void Game::renderWorld() const
 
 void Game::renderDungeon() const
 {
-    for (int y = 0; y < Dungeon::kHeight; ++y)
+    const float halfWidth = constants::kInternalWidth * 0.5F / camera_.zoom;
+    const float halfHeight = constants::kInternalHeight * 0.5F / camera_.zoom;
+    const int firstX = std::max(0, static_cast<int>((camera_.target.x - halfWidth) / Dungeon::kTileSize) - 2);
+    const int lastX = std::min(Dungeon::kWidth - 1, static_cast<int>((camera_.target.x + halfWidth) / Dungeon::kTileSize) + 2);
+    const int firstY = std::max(0, static_cast<int>((camera_.target.y - halfHeight) / Dungeon::kTileSize) - 2);
+    const int lastY = std::min(Dungeon::kHeight - 1, static_cast<int>((camera_.target.y + halfHeight) / Dungeon::kTileSize) + 2);
+
+    for (int y = firstY; y <= lastY; ++y)
     {
-        for (int x = 0; x < Dungeon::kWidth; ++x)
+        for (int x = firstX; x <= lastX; ++x)
         {
             const TileType tile = dungeon_.tileAt(x, y);
             const int worldX = x * Dungeon::kTileSize;
             const int worldY = y * Dungeon::kTileSize;
             const unsigned int pattern = static_cast<unsigned int>(x * 73856093) ^ static_cast<unsigned int>(y * 19349663) ^ seed_;
 
-            if (tile == TileType::Floor)
+            if (tile == TileType::Floor && urbanAtlas_.id != 0U)
+            {
+                const int roomId = dungeon_.roomAtWorld(worldX + Dungeon::kTileSize * 0.5F,
+                                                        worldY + Dungeon::kTileSize * 0.5F);
+                int tileColumn = 2;
+                if (roomId >= 0)
+                {
+                    const Room& room = dungeon_.rooms()[static_cast<std::size_t>(roomId)];
+                    switch (room.type)
+                    {
+                    case RoomType::Start: tileColumn = 1; break;
+                    case RoomType::Combat: tileColumn = (room.id & 1) == 0 ? 0 : 1; break;
+                    case RoomType::Treasure: tileColumn = 3; break;
+                    case RoomType::Scratcher: tileColumn = 2; break;
+                    case RoomType::Normal: tileColumn = room.id % 3 == 0 ? 4 : 2; break;
+                    case RoomType::Boss: tileColumn = 5; break;
+                    }
+                }
+                else if (x < Dungeon::kWidth / 3)
+                {
+                    tileColumn = 1;
+                }
+                else if (x >= Dungeon::kWidth * 2 / 3)
+                {
+                    tileColumn = 3;
+                }
+                const Rectangle destination{static_cast<float>(worldX), static_cast<float>(worldY),
+                                            static_cast<float>(Dungeon::kTileSize), static_cast<float>(Dungeon::kTileSize)};
+                DrawTexturePro(urbanAtlas_, atlasSource(urbanAtlas_, tileColumn, 0), destination, Vector2{}, 0.0F, WHITE);
+                if (pattern % 43U == 0U)
+                {
+                    DrawTexturePro(urbanAtlas_, atlasSource(urbanAtlas_, static_cast<int>(pattern % 6U), 2),
+                                   destination, Vector2{}, 0.0F, Fade(WHITE, 0.82F));
+                }
+            }
+            else if (tile == TileType::Wall && urbanAtlas_.id != 0U)
+            {
+                const int column = (x / 12 + y / 10 + static_cast<int>(seed_ % 6U)) % 6;
+                const int row = pattern % 79U == 0U ? 3 : 1;
+                const Rectangle destination{static_cast<float>(worldX), static_cast<float>(worldY),
+                                            static_cast<float>(Dungeon::kTileSize), static_cast<float>(Dungeon::kTileSize)};
+                DrawTexturePro(urbanAtlas_, atlasSource(urbanAtlas_, column, row), destination, Vector2{}, 0.0F, WHITE);
+            }
+            else if (tile == TileType::Empty)
+            {
+                const Color block = (pattern & 1U) == 0U ? Color{25, 29, 34, 255} : Color{28, 33, 38, 255};
+                DrawRectangle(worldX, worldY, Dungeon::kTileSize, Dungeon::kTileSize, block);
+                if (urbanAtlas_.id != 0U && pattern % 127U == 0U)
+                {
+                    const Rectangle destination{static_cast<float>(worldX), static_cast<float>(worldY),
+                                                static_cast<float>(Dungeon::kTileSize), static_cast<float>(Dungeon::kTileSize)};
+                    DrawTexturePro(urbanAtlas_, atlasSource(urbanAtlas_, 5, 3), destination, Vector2{}, 0.0F, Fade(WHITE, 0.45F));
+                }
+            }
+            else if (tile == TileType::Floor)
             {
                 const Color base = (pattern & 1U) == 0U ? Color{61, 64, 69, 255} : Color{65, 68, 73, 255};
                 DrawRectangle(worldX, worldY, Dungeon::kTileSize, Dungeon::kTileSize, base);
@@ -589,7 +786,20 @@ void Game::renderObjects() const
     {
         const Color color = itemColor(item.type);
         DrawCircleV(Vector2{item.position.x, item.position.y + 5.0F}, 7.0F, Fade(BLACK, 0.35F));
-        if (item.type == ItemType::Sachet)
+        if (propsAtlas_.id != 0U)
+        {
+            int column = 0;
+            if (item.type == ItemType::Catnip)
+            {
+                column = 1;
+            }
+            else if (item.type == ItemType::Coin)
+            {
+                column = 2;
+            }
+            drawAtlasSprite(propsAtlas_, column, 1, Vector2{item.position.x, item.position.y - 2.0F}, 25.0F, 25.0F);
+        }
+        else if (item.type == ItemType::Sachet)
         {
             DrawRectangle(static_cast<int>(item.position.x - 6), static_cast<int>(item.position.y - 7), 12, 13, color);
             DrawRectangle(static_cast<int>(item.position.x - 4), static_cast<int>(item.position.y - 5), 8, 3, Color{255, 211, 224, 255});
@@ -608,19 +818,29 @@ void Game::renderObjects() const
 
     for (const TrashCan& trash : trashCans_)
     {
-        DrawRectangle(static_cast<int>(trash.position.x - 9), static_cast<int>(trash.position.y - 9), 18, 20, trash.opened ? Color{75, 82, 88, 255} : Color{91, 101, 105, 255});
-        DrawRectangle(static_cast<int>(trash.position.x - 11), static_cast<int>(trash.position.y - (trash.opened ? 15 : 12)), 22, 5, Color{124, 132, 132, 255});
-        DrawLine(static_cast<int>(trash.position.x - 4), static_cast<int>(trash.position.y - 5), static_cast<int>(trash.position.x - 4), static_cast<int>(trash.position.y + 7), Color{54, 60, 65, 255});
-        DrawLine(static_cast<int>(trash.position.x + 4), static_cast<int>(trash.position.y - 5), static_cast<int>(trash.position.x + 4), static_cast<int>(trash.position.y + 7), Color{54, 60, 65, 255});
+        if (propsAtlas_.id != 0U)
+        {
+            drawAtlasSprite(propsAtlas_, trash.opened ? 1 : 0, 0,
+                            Vector2{trash.position.x, trash.position.y - 5.0F}, 42.0F, 42.0F);
+        }
+        else
+        {
+            DrawRectangle(static_cast<int>(trash.position.x - 9), static_cast<int>(trash.position.y - 9), 18, 20, trash.opened ? Color{75, 82, 88, 255} : Color{91, 101, 105, 255});
+            DrawRectangle(static_cast<int>(trash.position.x - 11), static_cast<int>(trash.position.y - (trash.opened ? 15 : 12)), 22, 5, Color{124, 132, 132, 255});
+        }
     }
 
     for (const Scratcher& scratcher : scratchers_)
     {
-        DrawRectangle(static_cast<int>(scratcher.position.x - 10), static_cast<int>(scratcher.position.y + 8), 20, 5, Color{74, 46, 32, 255});
-        DrawRectangle(static_cast<int>(scratcher.position.x - 4), static_cast<int>(scratcher.position.y - 14), 8, 23, scratcher.used ? Color{111, 78, 48, 255} : Color{177, 122, 61, 255});
-        for (int scratch = -8; scratch <= 4; scratch += 4)
+        if (propsAtlas_.id != 0U)
         {
-            DrawLine(static_cast<int>(scratcher.position.x - 4), static_cast<int>(scratcher.position.y + scratch), static_cast<int>(scratcher.position.x + 4), static_cast<int>(scratcher.position.y + scratch - 3), Color{234, 189, 106, 255});
+            drawAtlasSprite(propsAtlas_, 2, 0, Vector2{scratcher.position.x, scratcher.position.y - 6.0F},
+                            44.0F, 44.0F, false, scratcher.used ? Fade(GRAY, 0.78F) : WHITE);
+        }
+        else
+        {
+            DrawRectangle(static_cast<int>(scratcher.position.x - 10), static_cast<int>(scratcher.position.y + 8), 20, 5, Color{74, 46, 32, 255});
+            DrawRectangle(static_cast<int>(scratcher.position.x - 4), static_cast<int>(scratcher.position.y - 14), 8, 23, scratcher.used ? Color{111, 78, 48, 255} : Color{177, 122, 61, 255});
         }
     }
 }
@@ -643,7 +863,45 @@ void Game::renderEnemies() const
 
         DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y + 7), enemy.type() == EnemyType::StrayDog ? 18.0F : 11.0F, 5.0F, Fade(BLACK, 0.35F));
         const bool hurt = enemy.state() == EnemyState::Hurt;
-        if (enemy.type() == EnemyType::Rat)
+        if (enemyAtlas_.id != 0U)
+        {
+            int row = 0;
+            float spriteSize = 36.0F;
+            if (enemy.type() == EnemyType::Bird)
+            {
+                row = 1;
+                spriteSize = 42.0F;
+            }
+            else if (enemy.type() == EnemyType::StrayDog)
+            {
+                row = 2;
+                spriteSize = 62.0F;
+            }
+
+            int frame = 0;
+            if (enemy.state() == EnemyState::Chase)
+            {
+                frame = 1 + static_cast<int>(GetTime() * 8.0) % 2;
+            }
+            else if (enemy.state() == EnemyState::Telegraph)
+            {
+                frame = 3;
+            }
+            else if (enemy.state() == EnemyState::Attack)
+            {
+                frame = 4;
+            }
+            else if (hurt)
+            {
+                frame = 5;
+            }
+            const float hover = enemy.type() == EnemyType::Bird
+                ? std::sin(static_cast<float>(GetTime()) * 8.0F + position.x) * 2.0F
+                : 0.0F;
+            drawAtlasSprite(enemyAtlas_, frame, row, Vector2{position.x, position.y - spriteSize * 0.20F + hover},
+                            spriteSize, spriteSize, enemy.facing().x < -0.05F, hurt ? Color{255, 205, 205, 255} : WHITE);
+        }
+        else if (enemy.type() == EnemyType::Rat)
         {
             const Color body = hurt ? WHITE : Color{133, 137, 146, 255};
             DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y), 10.0F, 7.0F, body);
@@ -705,15 +963,42 @@ void Game::renderPlayer() const
     }
 
     DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y + 8), 12.0F, 5.0F, Fade(BLACK, 0.38F));
-    DrawLineEx(Vector2{position.x - player_.direction().x * 7.0F, position.y - player_.direction().y * 4.0F}, Vector2{position.x - player_.direction().x * 18.0F - player_.direction().y * 5.0F, position.y - player_.direction().y * 13.0F + player_.direction().x * 5.0F}, 4.0F, Color{204, 80, 26, 255});
-    DrawCircleV(position, 10.0F, Color{230, 112, 35, 255});
-    const Vector2 head{position.x + player_.direction().x * 6.0F, position.y + player_.direction().y * 5.0F - 3.0F};
-    DrawCircleV(head, 7.0F, Color{242, 133, 44, 255});
-    DrawTriangle(Vector2{head.x - 6, head.y - 4}, Vector2{head.x - 3, head.y - 12}, Vector2{head.x, head.y - 5}, Color{242, 133, 44, 255});
-    DrawTriangle(Vector2{head.x + 1, head.y - 5}, Vector2{head.x + 5, head.y - 12}, Vector2{head.x + 7, head.y - 3}, Color{242, 133, 44, 255});
-    DrawCircle(static_cast<int>(head.x + player_.direction().x * 4.0F - player_.direction().y * 2.0F), static_cast<int>(head.y + player_.direction().y * 3.0F - 1.0F), 1.5F, Color{43, 48, 35, 255});
-    DrawCircle(static_cast<int>(head.x + player_.direction().x * 4.0F + player_.direction().y * 2.0F), static_cast<int>(head.y + player_.direction().y * 3.0F + 1.0F), 1.5F, Color{43, 48, 35, 255});
-    DrawLineEx(Vector2{position.x - 6, position.y - 7}, Vector2{position.x + 7, position.y - 7}, 2.0F, Color{51, 193, 210, 255});
+    if (playerAtlas_.id != 0U)
+    {
+        int row = 2;
+        const Vector2 direction = player_.direction();
+        if (std::abs(direction.y) >= std::abs(direction.x))
+        {
+            row = direction.y >= 0.0F ? 0 : 3;
+        }
+        else
+        {
+            row = direction.x < 0.0F ? 1 : 2;
+        }
+
+        int frame = 0;
+        if (player_.attackActive())
+        {
+            frame = 4 + static_cast<int>(GetTime() * 14.0) % 2;
+        }
+        else if (player_.isMoving())
+        {
+            frame = 1 + static_cast<int>(GetTime() * 9.0) % 3;
+        }
+        drawAtlasSprite(playerAtlas_, frame, row, Vector2{position.x, position.y - 12.0F}, 54.0F, 54.0F);
+    }
+    else
+    {
+        DrawLineEx(Vector2{position.x - player_.direction().x * 7.0F, position.y - player_.direction().y * 4.0F}, Vector2{position.x - player_.direction().x * 18.0F - player_.direction().y * 5.0F, position.y - player_.direction().y * 13.0F + player_.direction().x * 5.0F}, 4.0F, Color{204, 80, 26, 255});
+        DrawCircleV(position, 10.0F, Color{230, 112, 35, 255});
+        const Vector2 head{position.x + player_.direction().x * 6.0F, position.y + player_.direction().y * 5.0F - 3.0F};
+        DrawCircleV(head, 7.0F, Color{242, 133, 44, 255});
+        DrawTriangle(Vector2{head.x - 6, head.y - 4}, Vector2{head.x - 3, head.y - 12}, Vector2{head.x, head.y - 5}, Color{242, 133, 44, 255});
+        DrawTriangle(Vector2{head.x + 1, head.y - 5}, Vector2{head.x + 5, head.y - 12}, Vector2{head.x + 7, head.y - 3}, Color{242, 133, 44, 255});
+        DrawCircle(static_cast<int>(head.x + player_.direction().x * 4.0F - player_.direction().y * 2.0F), static_cast<int>(head.y + player_.direction().y * 3.0F - 1.0F), 1.5F, Color{43, 48, 35, 255});
+        DrawCircle(static_cast<int>(head.x + player_.direction().x * 4.0F + player_.direction().y * 2.0F), static_cast<int>(head.y + player_.direction().y * 3.0F + 1.0F), 1.5F, Color{43, 48, 35, 255});
+        DrawLineEx(Vector2{position.x - 6, position.y - 7}, Vector2{position.x + 7, position.y - 7}, 2.0F, Color{51, 193, 210, 255});
+    }
 
     if (player_.attackActive())
     {
@@ -777,16 +1062,42 @@ void Game::renderBoss() const
     }
 
     DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y + 17), 31.0F, 10.0F, Fade(BLACK, 0.42F));
-    DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y), 27.0F, 19.0F, Color{205, 135, 60, 255});
-    const Vector2 head{position.x + boss_.attackDirection().x * 20.0F, position.y + boss_.attackDirection().y * 11.0F - 6.0F};
-    DrawCircleV(head, 15.0F, Color{224, 151, 68, 255});
-    DrawTriangle(Vector2{head.x - 12, head.y - 8}, Vector2{head.x - 9, head.y - 24}, Vector2{head.x - 1, head.y - 11}, Color{116, 74, 45, 255});
-    DrawTriangle(Vector2{head.x + 2, head.y - 11}, Vector2{head.x + 11, head.y - 24}, Vector2{head.x + 13, head.y - 7}, Color{116, 74, 45, 255});
-    DrawCircle(static_cast<int>(head.x + boss_.attackDirection().x * 12.0F), static_cast<int>(head.y + boss_.attackDirection().y * 5.0F), 4.0F, Color{48, 35, 29, 255});
-    DrawCircle(static_cast<int>(head.x - 5), static_cast<int>(head.y - 4), 2.0F, Color{31, 30, 25, 255});
-    DrawCircle(static_cast<int>(head.x + 5), static_cast<int>(head.y - 4), 2.0F, Color{31, 30, 25, 255});
-    DrawLineEx(Vector2{position.x - 18, position.y - 12}, Vector2{position.x + 20, position.y - 12}, 4.0F, boss_.phaseTwo() ? RED : Color{49, 182, 196, 255});
-    DrawLineEx(Vector2{position.x - boss_.attackDirection().x * 24.0F, position.y}, Vector2{position.x - boss_.attackDirection().x * 39.0F, position.y - 12.0F}, 7.0F, Color{184, 112, 54, 255});
+    if (enemyAtlas_.id != 0U)
+    {
+        int frame = 0;
+        if (boss_.state() == BossState::ChooseAttack || boss_.state() == BossState::Telegraph)
+        {
+            frame = 3;
+        }
+        else if (boss_.state() == BossState::Attack)
+        {
+            frame = 4;
+        }
+        else if (boss_.state() == BossState::Recover || boss_.state() == BossState::PhaseTransition)
+        {
+            frame = 5;
+        }
+        else
+        {
+            frame = 1 + static_cast<int>(GetTime() * 4.0) % 2;
+        }
+        const Color tint = boss_.phaseTwo() ? Color{255, 205, 195, 255} : WHITE;
+        drawAtlasSprite(enemyAtlas_, frame, 3, Vector2{position.x, position.y - 26.0F},
+                        104.0F, 104.0F, boss_.attackDirection().x < -0.05F, tint);
+    }
+    else
+    {
+        DrawEllipse(static_cast<int>(position.x), static_cast<int>(position.y), 27.0F, 19.0F, Color{205, 135, 60, 255});
+        const Vector2 head{position.x + boss_.attackDirection().x * 20.0F, position.y + boss_.attackDirection().y * 11.0F - 6.0F};
+        DrawCircleV(head, 15.0F, Color{224, 151, 68, 255});
+        DrawTriangle(Vector2{head.x - 12, head.y - 8}, Vector2{head.x - 9, head.y - 24}, Vector2{head.x - 1, head.y - 11}, Color{116, 74, 45, 255});
+        DrawTriangle(Vector2{head.x + 2, head.y - 11}, Vector2{head.x + 11, head.y - 24}, Vector2{head.x + 13, head.y - 7}, Color{116, 74, 45, 255});
+        DrawCircle(static_cast<int>(head.x + boss_.attackDirection().x * 12.0F), static_cast<int>(head.y + boss_.attackDirection().y * 5.0F), 4.0F, Color{48, 35, 29, 255});
+        DrawCircle(static_cast<int>(head.x - 5), static_cast<int>(head.y - 4), 2.0F, Color{31, 30, 25, 255});
+        DrawCircle(static_cast<int>(head.x + 5), static_cast<int>(head.y - 4), 2.0F, Color{31, 30, 25, 255});
+        DrawLineEx(Vector2{position.x - 18, position.y - 12}, Vector2{position.x + 20, position.y - 12}, 4.0F, boss_.phaseTwo() ? RED : Color{49, 182, 196, 255});
+        DrawLineEx(Vector2{position.x - boss_.attackDirection().x * 24.0F, position.y}, Vector2{position.x - boss_.attackDirection().x * 39.0F, position.y - 12.0F}, 7.0F, Color{184, 112, 54, 255});
+    }
 
     if (showDebug_)
     {
@@ -820,6 +1131,12 @@ void Game::renderHud() const
     DrawText(TextFormat("R CATNIP x%zu", player_.inventory().count(ItemType::Catnip)), 526, 16, 9, Color{101, 224, 130, 255});
     DrawText(TextFormat("TAMPINHAS %zu", player_.inventory().count(ItemType::Coin)), 442, 34, 9, Color{244, 199, 70, 255});
 
+    if (propsAtlas_.id != 0U)
+    {
+        drawAtlasSprite(propsAtlas_, inventoryOpen_ ? 1 : 0, 2, Vector2{416.0F, 23.0F}, 34.0F, 34.0F);
+    }
+    DrawText("TAB", 405, 43, 8, Color{201, 211, 223, 255});
+
     if (currentRoomId_ >= 0 && currentRoomId_ < static_cast<int>(dungeon_.rooms().size()))
     {
         const char* name = roomTypeName(dungeon_.rooms()[static_cast<std::size_t>(currentRoomId_)].type);
@@ -851,6 +1168,79 @@ void Game::renderHud() const
         const char* bossName = boss_.phaseTwo() ? "CARAMELO - FASE 2" : "CARAMELO, O REI DAS RUAS";
         DrawText(bossName, constants::kInternalWidth / 2 - MeasureText(bossName, 10) / 2, 64, 10, RAYWHITE);
     }
+}
+
+void Game::renderInventoryBag() const
+{
+    DrawRectangle(0, 0, constants::kInternalWidth, constants::kInternalHeight, Fade(Color{8, 10, 14, 255}, 0.76F));
+    const Rectangle panel{74.0F, 38.0F, 492.0F, 284.0F};
+    DrawRectangleRounded(panel, 0.06F, 8, Color{35, 29, 28, 248});
+    DrawRectangleRoundedLinesEx(panel, 0.06F, 8, 2.0F, Color{223, 157, 72, 255});
+    DrawText("BOLSA DO AVENTUREIRO", 101, 56, 20, Color{255, 205, 120, 255});
+    DrawText("TAB / I / TRIANGULO: fechar", 382, 78, 8, Color{174, 184, 198, 255});
+    DrawLine(96, 86, 543, 86, Color{92, 72, 60, 255});
+
+    if (propsAtlas_.id != 0U)
+    {
+        drawAtlasSprite(propsAtlas_, 1, 2, Vector2{188.0F, 150.0F}, 132.0F, 132.0F);
+    }
+    else
+    {
+        DrawRectangleRounded(Rectangle{113, 107, 150, 143}, 0.12F, 6, Color{109, 77, 46, 255});
+    }
+    DrawText(TextFormat("%zu itens carregados", player_.inventory().size()), 132, 205, 10, LIGHTGRAY);
+
+    const Rectangle mapArea{105.0F, 226.0F, 166.0F, 76.0F};
+    DrawRectangleRounded(mapArea, 0.08F, 4, Color{24, 31, 35, 255});
+    DrawRectangleRoundedLinesEx(mapArea, 0.08F, 4, 1.0F, Color{67, 106, 116, 255});
+    const auto mapPoint = [&mapArea](const GridPoint point) {
+        return Vector2{mapArea.x + 5.0F + static_cast<float>(point.x) / Dungeon::kWidth * (mapArea.width - 10.0F),
+                       mapArea.y + 5.0F + static_cast<float>(point.y) / Dungeon::kHeight * (mapArea.height - 10.0F)};
+    };
+    for (const Room& room : dungeon_.rooms())
+    {
+        const Vector2 from = mapPoint(room.center());
+        for (const int neighbor : room.neighbors)
+        {
+            if (room.id < neighbor)
+            {
+                DrawLineEx(from, mapPoint(dungeon_.rooms()[static_cast<std::size_t>(neighbor)].center()), 1.0F, Color{61, 78, 82, 255});
+            }
+        }
+    }
+    for (const Room& room : dungeon_.rooms())
+    {
+        Color marker = Color{112, 130, 134, 255};
+        float radius = 2.0F;
+        if (room.id == dungeon_.bossRoomId())
+        {
+            marker = Color{238, 91, 71, 255};
+            radius = 3.0F;
+        }
+        if (room.id == currentRoomId_)
+        {
+            marker = Color{255, 207, 84, 255};
+            radius = 4.0F;
+        }
+        DrawCircleV(mapPoint(room.center()), radius, marker);
+    }
+
+    const auto drawSlot = [this](const int y, const int iconColumn, const ItemType type,
+                                 const char* key, const char* description, const Color color) {
+        const Rectangle slot{296.0F, static_cast<float>(y), 238.0F, 48.0F};
+        DrawRectangleRounded(slot, 0.12F, 5, Color{52, 47, 47, 255});
+        DrawRectangleRoundedLinesEx(slot, 0.12F, 5, 1.0F, Color{91, 84, 83, 255});
+        drawAtlasSprite(propsAtlas_, iconColumn, 1, Vector2{321.0F, static_cast<float>(y + 24)}, 40.0F, 40.0F);
+        DrawText(TextFormat("%s  x%zu", itemName(type), player_.inventory().count(type)), 347, y + 8, 12, color);
+        DrawText(TextFormat("[%s] %s", key, description), 347, y + 27, 8, Color{185, 190, 198, 255});
+    };
+    drawSlot(101, 0, ItemType::Sachet, "Q", "recupera 32 HP", Color{247, 129, 161, 255});
+    drawSlot(157, 1, ItemType::Catnip, "R", "ativa Furia Felina", Color{112, 225, 132, 255});
+    drawSlot(213, 2, ItemType::Coin, "-", "moeda das ruas", Color{248, 205, 84, 255});
+
+    DrawText(TextFormat("HP %d/%d", player_.hp(), player_.maxHp()), 296, 279, 10, Color{244, 102, 106, 255});
+    DrawText(TextFormat("ATQ %d (+%d run)", player_.attack(), player_.permanentAttackBonus()), 373, 279, 10, Color{255, 190, 92, 255});
+    DrawText(TextFormat("Distrito %dx%d tiles", Dungeon::kWidth, Dungeon::kHeight), 296, 298, 9, Color{137, 188, 218, 255});
 }
 
 void Game::renderDebugPanel() const

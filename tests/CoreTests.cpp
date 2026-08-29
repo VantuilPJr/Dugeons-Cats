@@ -81,7 +81,8 @@ int main()
     for (const unsigned int seed : {1U, 7U, 42U, 2026U})
     {
         Dungeon dungeon = generator.generate(seed);
-        expect(dungeon.rooms().size() >= 6, "generated room count");
+        expect(dungeon.rooms().size() >= 20, "expanded district room count");
+        expect(Dungeon::kWidth == 112 && Dungeon::kHeight == 72, "expanded open-district matrix size");
         expect(dungeon.graph().isConnected(), "generated graph connected");
         const auto bossPath = dungeon.graph().breadthFirstShortestPath(dungeon.startRoomId(), dungeon.bossRoomId());
         expect(bossPath.size() >= 2, "entrance reaches boss through BFS");
