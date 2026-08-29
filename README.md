@@ -6,8 +6,11 @@ Você controla um pequeno gato laranja explorando um único piso procedural insp
 
 ## Funcionalidades
 
-- dungeon procedural de salas e corredores, com seed diferente por run;
-- mapa de `64x40` tiles e câmera top-down;
+- distrito-dungeon procedural amplo, com seed diferente por run, 24 zonas e ruas largas interconectadas;
+- mapa de `112x72` tiles (`2688x1728` pixels de mundo) e câmera top-down;
+- cenário 2D brasileiro com asfalto, calçadas, muros, grafites, portões, becos, áreas abandonadas e pequenos comércios;
+- protagonista inspirado no gato laranja de referência, com 24 frames direcionais de movimento e ataque;
+- ratos, pássaros, cães e Caramelo com atlas animado e frames individuais exportados;
 - movimento em oito direções, colisão lógica e esquiva;
 - teclado, D-Pad e analógico esquerdo com dead zone radial;
 - ataque de garras, crítico, knockback, cooldown e invulnerabilidade;
@@ -15,7 +18,7 @@ Você controla um pequeno gato laranja explorando um único piso procedural insp
 - sachê de cura, catnip e Fúria Felina temporária;
 - arranhadores que concedem `ATQ +2` durante a run;
 - latas de lixo com estado fechado/aberto e recompensa única;
-- inventário de sachês, catnip e tampinhas;
+- bolsa visual com inventário, atributos e minimapa do grafo da dungeon;
 - boss com mordida, patada, investida e latido em área;
 - segunda fase do boss aos 50% de HP, com agressividade e combos maiores;
 - HUD, partículas, screen shake, telegraphs e áudio procedural;
@@ -98,6 +101,7 @@ A pasta `dist` contém somente o executável e os assets necessários. O runtime
 | Interagir | E | Círculo |
 | Usar sachê | Q | L1 |
 | Usar catnip | R | R1 |
+| Abrir/fechar bolsa | Tab ou I | Triângulo |
 | Pausar | Esc | Start |
 | Diagnóstico | F3 | Select |
 
@@ -112,6 +116,15 @@ O botão Triângulo e o analógico direito permanecem reservados para ideias fut
 5. Procure a sala **REI DAS RUAS**.
 6. Observe os telegraphs do Caramelo; todos os ataques possuem preparação, execução e recuperação.
 7. Reduza o HP do boss a zero para vencer a run.
+
+## Arte e animações
+
+Os atlas usados em tempo de execução ficam em `assets/sprites` e `assets/tiles`. Para facilitar ajustes quadro a quadro, os 48 frames de personagem foram exportados separadamente:
+
+- `assets/sprites/frames/player`: 24 frames do gato (4 direções, caminhada e ataque);
+- `assets/sprites/frames/enemies`: 24 frames de rato, pássaro, vira-lata e Caramelo.
+
+O código usa recortes dos atlas para manter poucas trocas de textura, mas a lógica de colisão e combate continua independente da arte.
 
 ## Diagnóstico do adaptador PS2
 
