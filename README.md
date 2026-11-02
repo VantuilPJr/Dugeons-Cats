@@ -1,5 +1,14 @@
 # Dungeons & Cats
 
+**Jogo 2D em C++ com estruturas de dados aplicadas ao gameplay.**
+
+Projeto acadêmico da disciplina de Estrutura de Dados. Um gato explora um distrito procedural inspirado em ruas brasileiras até enfrentar Caramelo, o Rei das Ruas. O objetivo técnico é tornar grafos, pilhas, filas e listas encadeadas parte do funcionamento do jogo.
+
+**Stack:** C++17 · raylib 5.5 · CMake · CTest  
+**Estado:** protótipo jogável com um piso e um chefe; instruções de compilação e testes abaixo.
+
+## Visão geral
+
 Jogo 2D de ação e dungeon crawler leve, desenvolvido em C++17 com raylib e CMake para a disciplina de Estrutura de Dados.
 
 Você controla um pequeno gato laranja explorando um único piso procedural inspirado em ruas e becos urbanos brasileiros. A run termina no confronto com **Caramelo, o Rei das Ruas**.
@@ -105,7 +114,7 @@ A pasta `dist` contém somente o executável e os assets necessários. O runtime
 | Pausar | Esc | Start |
 | Diagnóstico | F3 | Select |
 
-O botão Triângulo e o analógico direito permanecem reservados para ideias futuras.
+O botão Triângulo abre a bolsa. O analógico direito não possui ação de gameplay nesta versão.
 
 ## Como jogar
 
@@ -191,7 +200,7 @@ Adaptadores PS2 genéricos podem reportar botões em ordens diferentes. Use o pa
 
 - A primeira versão possui exatamente um piso e um boss.
 - A lógica não depende de pixels dos sprites para colisão.
-- Sprites de gameplay são desenhados com primitivas pixel-art para manter o protótipo independente de arte externa.
+- Sprites e cenários usam os atlas versionados em `assets`; colisão e combate permanecem independentes da arte. Consulte [o processo de arte](docs/ART_PIPELINE.md).
 - A tela de título usa `assets/ui/title-background.png`, gerada com a ferramenta integrada OpenAI ImageGen; existe fallback procedural se o arquivo estiver ausente.
 - Efeitos e música são sintetizados em memória, sem arquivos de áudio externos.
 - A instalação parcial do Visual Studio encontrada durante o desenvolvimento não continha `rc.exe`; o build de validação utilizou WinLibs/MinGW-w64 portátil com Ninja.
@@ -204,3 +213,7 @@ Adaptadores PS2 genéricos podem reportar botões em ordens diferentes. Use o pa
 - sprites animados adicionais;
 - sistema de opções e volume;
 - persistência de recordes por seed.
+
+## English summary
+
+A playable 2D C++17 game built with raylib and CMake for a Data Structures course. Graphs, manually implemented stacks, queues and linked lists support dungeon generation, traversal, shortest paths and inventory. The current scope is one procedural floor and one boss. Build and CTest instructions are documented above.
